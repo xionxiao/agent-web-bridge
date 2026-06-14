@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Web Bridge</title>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
+
+  <style>
+    *, *::before, *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    html, body {
+      height: 100%;
+      overflow: hidden;
+      background: #1e1e1e;
+    }
+    #terminal-container {
+      height: 100%;
+      padding: 4px;
+    }
+
+    /* Connection status overlay */
+    #overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.85);
+      color: #e0e0e0;
+      font-family: 'Menlo', 'Consolas', 'Courier New', monospace;
+      font-size: 16px;
+      z-index: 100;
+      transition: opacity 0.4s ease;
+      user-select: none;
+    }
+    #overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+    #status-message {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    /* Spinner */
+    .spinner {
+      display: inline-block;
+      width: 18px;
+      height: 18px;
+      border: 3px solid rgba(255, 255, 255, 0.15);
+      border-top-color: #e0e0e0;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Reconnect button */
+    #reconnect-btn {
+      display: none;
+      margin-top: 16px;
+      padding: 8px 20px;
+      font-family: inherit;
+      font-size: 14px;
+      cursor: pointer;
+      background: #2d2d2d;
+      color: #e0e0e0;
+      border: 1px solid #555;
+      border-radius: 4px;
+      transition: background 0.2s;
+    }
+    #reconnect-btn:hover {
+      background: #3d3d3d;
+    }
+
+    .text-center { text-align: center; }
+  </style>
+</head>
+<body>
+
+  <div id="overlay">
+    <div class="text-center">
+      <div id="status-message">
+        <span class="spinner"></span>
+        <span id="status-text">Connecting...</span>
+      </div>
+      <button id="reconnect-btn">Reconnect</button>
+    </div>
+  </div>
+
+  <div id="terminal-container"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.min.js"></script>
+
+  <script>
+    (function () {
+      'use strict';
+
+      const container  = document.getElementById('terminal-container');
+      const overlay    = document.getElementById('overlay');
+      const statusText = document.getElementById('status-text');
+      const statusMsg  = document.getElementById('status-message');
+      const reconnectBtn = document.getElementById('reconnect-btn');
+
+      const term = new Terminal({
+        cursorBlink: true,
+        cursorStyle: 'block',
+        fontSize: 14,
+        fontFamily: '"Menlo", "Consolas", "DejaVu Sans Mono", "Courier New", monospace',
+        allowTransparency: false,
+        theme: {
+          background: '#1e1e1e',
+          foreground: '#d4d4d4',
+          cursor: '#d4d4d4',
+          selectionBackground: '#264f78',
+          black: '#252526',
+          red: '#f44747',
+          green: '#6a9955',
+          yellow: '#d7ba7d',
+          blue: '#569cd6',
+          magenta: '#c586c0',
+          cyan: '#4ec9b0',
+          white: '#d4d4d4',
+          brightBlack: '#808080',
+          brightRed: '#f44747',
+          brightGreen: '#6a9955',
+          brightYellow: '#d7ba7d',
+          brightBlue: '#569cd6',
+          brightMagenta: '#c586c0',
+          brightCyan: '#4ec9b0',
+          brightWhite: '#d4d4d4',
+        },
+      });
+
+      const fitAddon = new FitAddon.FitAddon();
+      const webLinksAddon = new WebLinksAddon.WebLinksAddon();
+      term.loadAddon(fitAddon);
+      term.loadAddon(webLinksAddon);
+
+      term.open(container);
+
+      // -------------------------------------------------------------------
+      // Overlay helpers
+      // -------------------------------------------------------------------
+      function showOverlay(showSpinner, message, showReconnect) {
+        overlay.classList.remove('hidden');
+        statusText.textContent = message || '';
+        var spinnerEl = statusMsg.querySelector('.spinner');
+        if (spinnerEl) {
+          spinnerEl.style.display = showSpinner ? 'inline-block' : 'none';
+        }
+        reconnectBtn.style.display = showReconnect ? 'inline-block' : 'none';
+      }
+
+      function hideOverlay() {
+        overlay.classList.add('hidden');
+        reconnectBtn.style.display = 'none';
+      }
+
+      // -------------------------------------------------------------------
+      // Resize handling (debounced)
+      // -------------------------------------------------------------------
+      var resizeTimer = null;
+
+      function sendResize() {
+        try {
+          fitAddon.fit();
+        } catch (_) {
+          return;
+        }
+        var dims = fitAddon.proposeDimensions();
+        if (dims && ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'resize',
+            cols: dims.cols,
+            rows: dims.rows,
+          }));
+        }
+      }
+
+      function debouncedResize() {
+        if (resizeTimer) clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(sendResize, 120);
+      }
+
+      window.addEventListener('resize', debouncedResize);
+
+      if (window.ResizeObserver) {
+        var ro = new ResizeObserver(function () { debouncedResize(); });
+        ro.observe(container);
+      }
+
+      // -------------------------------------------------------------------
+      // WebSocket connection
+      // -------------------------------------------------------------------
+      var ws = null;
+      var reconnectTimer = null;
+      var intentionalClose = false;
+      var reconnectAttempts = 0;
+      var MAX_RECONNECT_DELAY = 15000;
+
+      function getReconnectDelay() {
+        var delay = Math.min(1000 * Math.pow(2, reconnectAttempts), MAX_RECONNECT_DELAY);
+        reconnectAttempts++;
+        return delay;
+      }
+
+      function scheduleReconnect() {
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        var delay = getReconnectDelay();
+        reconnectTimer = setTimeout(function () { connect(); }, delay);
+      }
+
+      function cancelReconnect() {
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
+        reconnectAttempts = 0;
+      }
+
+      function connect() {
+        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+          return;
+        }
+
+        intentionalClose = false;
+        showOverlay(true, 'Connecting...', false);
+
+        var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        var wsUrl = protocol + '//' + window.location.host;
+
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = function () {
+          console.log('[ws] Connected');
+          showOverlay(true, 'Starting Claude...', false);
+          cancelReconnect();
+          sendResize();
+        };
+
+        ws.onmessage = function (event) {
+          var msg;
+          try {
+            msg = JSON.parse(event.data);
+          } catch (e) {
+            term.write(event.data);
+            return;
+          }
+
+          switch (msg.type) {
+            case 'data':
+              hideOverlay();
+              term.write(msg.data);
+              break;
+
+            case 'exit':
+              showOverlay(
+                false,
+                'Claude exited (code: ' + msg.code +
+                  (msg.signal ? ', signal: ' + msg.signal : '') + ').' +
+                  ' The session has ended. Close this tab or open a new one to restart.',
+                true
+              );
+              break;
+
+            case 'error':
+              console.error('[ws] Server error:', msg.message);
+              showOverlay(false, 'Error: ' + msg.message, true);
+              break;
+
+            default:
+              console.log('[ws] Unknown message type:', msg.type);
+          }
+        };
+
+        ws.onclose = function () {
+          console.log('[ws] Closed');
+          ws = null;
+          if (!intentionalClose) {
+            showOverlay(true, 'Connection lost. Reconnecting...', false);
+            scheduleReconnect();
+          }
+        };
+
+        ws.onerror = function () {
+          console.error('[ws] Error');
+        };
+      }
+
+      // -------------------------------------------------------------------
+      // Manual reconnect button
+      // -------------------------------------------------------------------
+      reconnectBtn.addEventListener('click', function () {
+        cancelReconnect();
+        connect();
+      });
+
+      // -------------------------------------------------------------------
+      // Terminal -> WebSocket: user input
+      // -------------------------------------------------------------------
+      term.onData(function (data) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'input', data: data }));
+        }
+      });
+
+      // -------------------------------------------------------------------
+      // Click on terminal container focuses terminal
+      // -------------------------------------------------------------------
+      container.addEventListener('click', function () {
+        term.focus();
+      });
+
+      // -------------------------------------------------------------------
+      // Prevent accidental browser tab close on Ctrl+N/W/T
+      // -------------------------------------------------------------------
+      container.addEventListener('keydown', function (e) {
+        if (
+          (e.ctrlKey && ['n', 'w', 't'].includes(e.key.toLowerCase())) ||
+          e.key === 'F5' ||
+          (e.ctrlKey && e.key === 'F5')
+        ) {
+          e.preventDefault();
+        }
+      });
+
+      // -------------------------------------------------------------------
+      // Cleanup on page unload
+      // -------------------------------------------------------------------
+      window.addEventListener('beforeunload', function () {
+        intentionalClose = true;
+        cancelReconnect();
+        if (ws) {
+          ws.close();
+          ws = null;
+        }
+      });
+
+      // -------------------------------------------------------------------
+      // Initial connection
+      // -------------------------------------------------------------------
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          try { fitAddon.fit(); } catch (_) { /* ignore layout glitches */ }
+          connect();
+        });
+      });
+
+    })();
+  </script>
+</body>
+</html>
