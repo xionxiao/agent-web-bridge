@@ -4,6 +4,9 @@
   "private": true,
   "description": "Web-based terminal bridge for Claude CLI using node-pty + WebSocket + xterm.js",
   "main": "server.js",
+  "bin": {
+    "agent-web-bridge": "./bin/agent-web-bridge.js"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js"

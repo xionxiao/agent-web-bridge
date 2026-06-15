@@ -8,7 +8,7 @@ const { spawn } = require('node-pty');
 // Configuration
 // ---------------------------------------------------------------------------
 const HTTP_PORT = process.env.PORT || 3001;
-const CLAUDE_BIN = process.env.CLAUDE_BIN || '/home/xhui/.local/bin/claude';
+const CLAUDE_BIN = process.env.CLAUDE_BIN || (process.env.HOME && `${process.env.HOME}/.local/bin/claude`);
 
 // ---------------------------------------------------------------------------
 // Express + HTTP server (serves web page + WebSocket)

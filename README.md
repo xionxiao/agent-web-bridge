@@ -1,6 +1,6 @@
 # agent-web-bridge
 
-A bridge that mirrors a local Claude CLI session to the browser. It spawns a PTY running `claude` and syncs I/O bidirectionally via WebSocket to xterm.js in the browser, so the local terminal and remote web page are two views of the same session.
+Mirror your local agent CLI session to any browser via WebSocket.
 
 ## Usage
 
@@ -8,14 +8,11 @@ A bridge that mirrors a local Claude CLI session to the browser. It spawns a PTY
 # Install dependencies
 npm install
 
-# Start (default port 3001)
-npm start
-
-# Dev mode (auto-restart on file changes)
-npm run dev
+# Or use npx
+npx agent-web-bridge
 
 # Custom port
-PORT=4000 npm start
+npx agent-web-bridge --port 4000
 
 # Custom claude binary path
 CLAUDE_BIN=/path/to/claude npm start
