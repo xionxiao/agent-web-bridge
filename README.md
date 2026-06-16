@@ -14,6 +14,12 @@ npx agent-web-bridge
 # Custom port
 npx agent-web-bridge --port 4000
 
+# Choose agent (claude or opencode)
+npx agent-web-bridge --agent=opencode
+
+# Pass extra arguments to agent
+npx agent-web-bridge --agent=opencode --args="--model=gpt-4"
+
 # Custom claude binary path
 CLAUDE_BIN=/path/to/claude npm start
 ```

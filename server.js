@@ -8,7 +8,8 @@ const { spawn } = require('node-pty');
 // Configuration
 // ---------------------------------------------------------------------------
 const HTTP_PORT = process.env.PORT || 3001;
-const CLAUDE_BIN = process.env.CLAUDE_BIN || (process.env.HOME && `${process.env.HOME}/.local/bin/claude`);
+const AGENT_BIN = process.env.CLAUDE_BIN || (process.env.HOME && `${process.env.HOME}/.local/bin/claude`);
+const AGENT_ARGS = (() => { try { return JSON.parse(process.env.AGENT_ARGS || '[]'); } catch { return []; } })();
 
 // ---------------------------------------------------------------------------
 // Express + HTTP server (serves web page + WebSocket)
@@ -103,7 +104,7 @@ function startPty() {
   const rows = process.stdout.rows || 24;
 
   try {
-    ptyProcess = spawn(CLAUDE_BIN, [], {
+    ptyProcess = spawn(AGENT_BIN, AGENT_ARGS, {
       name: 'xterm-256color',
       cols,
       rows,
@@ -114,11 +115,11 @@ function startPty() {
       },
     });
   } catch (err) {
-    console.error('[pty] Failed to spawn Claude:', err.message);
+    console.error('[pty] Failed to spawn agent:', err.message);
     process.exit(1);
   }
 
-  console.log('[pty] Claude PID: %d, size: %dx%d', ptyProcess.pid, cols, rows);
+  console.log('[pty] Agent PID: %d, size: %dx%d, args: %o', ptyProcess.pid, cols, rows, AGENT_ARGS);
 
   // ---- PTY output → terminal stdout + web broadcast -------------------
   ptyProcess.onData((data) => {
