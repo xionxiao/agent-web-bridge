@@ -10,13 +10,43 @@ const AGENT_MAP = {
   'kiro-cli':  'kiro-cli',
 };
 
+function printHelp() {
+  const agents = Object.keys(AGENT_MAP).join(', ');
+  /* eslint-disable no-console */
+  console.log(`
+agent-web-bridge — bridge a local agent CLI session to the browser.
+
+USAGE
+  agent-web-bridge [options]
+
+OPTIONS
+  -h, --help            Show this help message and exit.
+      --port=<port>     HTTP/WebSocket port (default: 3001, or $PORT).
+      --agent=<name>    Agent to launch. Supported: ${agents}.
+                        Default: claude.
+      --args="<...>"    Extra arguments forwarded to the agent, space-separated.
+
+ENVIRONMENT
+  PORT          Overrides the default port (same as --port).
+
+EXAMPLES
+  agent-web-bridge
+  agent-web-bridge --port=4000 --agent=opencode
+  agent-web-bridge --agent=codex --args="--model gpt-5"
+  PORT=4000 agent-web-bridge
+`.trim());
+}
+
 const cliArgs = process.argv.slice(2);
 let port = process.env.PORT || 3001;
 let agentBin = null;
 let agentArgs = [];
 
 for (let i = 0; i < cliArgs.length; i++) {
-  if (cliArgs[i] === '--port' && cliArgs[i + 1]) {
+  if (cliArgs[i] === '--help' || cliArgs[i] === '-h') {
+    printHelp();
+    process.exit(0);
+  } else if (cliArgs[i] === '--port' && cliArgs[i + 1]) {
     port = parseInt(cliArgs[i + 1], 10);
     if (isNaN(port) || port < 1 || port > 65535) {
       console.error('Invalid port number:', cliArgs[i + 1]);
