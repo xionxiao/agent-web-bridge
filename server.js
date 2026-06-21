@@ -1,3 +1,4 @@
+const os = require('os');
 const express = require('express');
 const http = require('http');
 const path = require('path');
@@ -8,6 +9,17 @@ const { spawn } = require('node-pty');
 // Configuration
 // ---------------------------------------------------------------------------
 const HTTP_PORT = process.env.PORT || 3001;
+const HTTP_HOST = process.env.HOST || '0.0.0.0';
+
+function getLocalIP() {
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const iface of ifaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
+    }
+  }
+  return HTTP_HOST;
+}
 const AGENT_BIN = process.env.CLAUDE_BIN || (process.env.HOME && `${process.env.HOME}/.local/bin/claude`);
 const AGENT_ARGS = (() => { try { return JSON.parse(process.env.AGENT_ARGS || '[]'); } catch { return []; } })();
 
@@ -88,8 +100,8 @@ let ptyExited = false;
 // ---------------------------------------------------------------------------
 // Start HTTP server first, then take over terminal and spawn claude
 // ---------------------------------------------------------------------------
-httpServer.listen(HTTP_PORT, () => {
-  console.log('[http] Web server at http://localhost:%d', HTTP_PORT);
+httpServer.listen(HTTP_PORT, HTTP_HOST, () => {
+  console.log('[http] Web server at http://%s:%d', getLocalIP(), HTTP_PORT);
   console.log('[http] Open the URL above in a browser to mirror this session.');
   console.log('');
 
