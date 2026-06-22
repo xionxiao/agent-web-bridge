@@ -73,8 +73,25 @@ const wss = new WebSocketServer({ server: httpServer });
 // WebSocket clients (web mirrors)
 // ---------------------------------------------------------------------------
 const wsClients = new Set();
+const ptyBuffer = [];        // circular buffer of PTY output chunks
+const PTY_BUF_MAX = 100000;  // keep last ~100KB
+let ptyBufferTotal = 0;
+
+function pushPtyBuffer(data) {
+  ptyBuffer.push(data);
+  ptyBufferTotal += data.length;
+  while (ptyBufferTotal > PTY_BUF_MAX && ptyBuffer.length > 0) {
+    const oldest = ptyBuffer.shift();
+    ptyBufferTotal -= oldest.length;
+  }
+}
+
+function getPtyBuffer() {
+  return ptyBuffer.join('');
+}
 
 function broadcastToWeb(data) {
+  pushPtyBuffer(data);
   for (const ws of wsClients) {
     if (ws.readyState === 1) {
       try {
@@ -95,6 +112,17 @@ function broadcastControlToWeb(jsonMsg) {
 wss.on('connection', (ws) => {
   wsClients.add(ws);
   console.log('[ws] Web client connected (%d total)', wsClients.size);
+
+  // Send buffered PTY output to newly connecting client
+  if (ptyBufferTotal > 0) {
+    const buf = getPtyBuffer();
+    if (buf) {
+      try {
+        ws.send(JSON.stringify({ type: 'data', data: buf }));
+        console.log('[ws] Sent buffer (%d bytes) to new client', buf.length);
+      } catch (_) {}
+    }
+  }
 
   ws.on('message', (raw) => {
     let msg;
@@ -135,7 +163,6 @@ let ptyExited = false;
 // Start HTTP server first, then take over terminal and spawn claude
 // ---------------------------------------------------------------------------
 httpServer.listen(HTTP_PORT, HTTP_HOST, () => {
-  ensureCert();
   const proto = USE_HTTPS ? 'https' : 'http';
   console.log('[http] Web server at %s://%s:%d', proto, getLocalIP(), HTTP_PORT);
   console.log('[http] Open the URL above in a browser to mirror this session.');

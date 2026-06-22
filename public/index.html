@@ -316,8 +316,6 @@
         ws = new WebSocket(wsUrl);
 
         ws.onopen = function () {
-          console.log('[ws] Connected');
-          showOverlay(true, 'Starting Claude...', false);
           cancelReconnect();
           sendResize();
         };
