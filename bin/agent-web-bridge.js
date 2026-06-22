@@ -22,12 +22,14 @@ USAGE
 OPTIONS
   -h, --help            Show this help message and exit.
       --port=<port>     HTTP/WebSocket port (default: 3001, or $PORT).
+      --https           Enable HTTPS with a self-signed certificate.
       --agent=<name>    Agent to launch. Supported: ${agents}.
                         Default: claude.
       --args="<...>"    Extra arguments forwarded to the agent, space-separated.
 
 ENVIRONMENT
   PORT          Overrides the default port (same as --port).
+  HTTPS         Set to "true" to enable HTTPS (same as --https).
 
 EXAMPLES
   agent-web-bridge
@@ -41,11 +43,14 @@ const cliArgs = process.argv.slice(2);
 let port = process.env.PORT || 3001;
 let agentBin = null;
 let agentArgs = [];
+let httpsMode = false;
 
 for (let i = 0; i < cliArgs.length; i++) {
   if (cliArgs[i] === '--help' || cliArgs[i] === '-h') {
     printHelp();
     process.exit(0);
+  } else if (cliArgs[i] === '--https') {
+    httpsMode = true;
   } else if (cliArgs[i] === '--port' && cliArgs[i + 1]) {
     port = parseInt(cliArgs[i + 1], 10);
     if (isNaN(port) || port < 1 || port > 65535) {
@@ -66,6 +71,7 @@ for (let i = 0; i < cliArgs.length; i++) {
 }
 
 process.env.PORT = String(port);
+if (httpsMode) process.env.HTTPS = 'true';
 if (agentBin) process.env.CLAUDE_BIN = agentBin;
 if (agentArgs.length) process.env.AGENT_ARGS = JSON.stringify(agentArgs);
 require(path.join(__dirname, '..', 'server.js'));

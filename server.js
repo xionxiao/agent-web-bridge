@@ -1,7 +1,10 @@
 const os = require('os');
+const fs = require('fs');
 const express = require('express');
 const http = require('http');
+const https = require('https');
 const path = require('path');
+const { execFileSync } = require('child_process');
 const { WebSocketServer } = require('ws');
 const { spawn } = require('node-pty');
 
@@ -10,6 +13,33 @@ const { spawn } = require('node-pty');
 // ---------------------------------------------------------------------------
 const HTTP_PORT = process.env.PORT || 3001;
 const HTTP_HOST = process.env.HOST || '0.0.0.0';
+const USE_HTTPS = process.env.HTTPS === 'true';
+const CERT_DIR = path.join(process.env.HOME || process.cwd(), '.config', 'agent-web-bridge');
+
+function ensureCert() {
+  if (!USE_HTTPS) return;
+  const keyFile = path.join(CERT_DIR, 'key.pem');
+  const certFile = path.join(CERT_DIR, 'cert.pem');
+  if (fs.existsSync(keyFile) && fs.existsSync(certFile)) return;
+
+  fs.mkdirSync(CERT_DIR, { recursive: true });
+  const subj = `/CN=${HTTP_HOST === '0.0.0.0' ? 'localhost' : HTTP_HOST}`;
+  try {
+    execFileSync('openssl', [
+      'req', '-x509', '-newkey', 'rsa:2048',
+      '-keyout', keyFile, '-out', certFile,
+      '-days', '365', '-nodes',
+      '-subj', subj,
+    ], { stdio: 'pipe' });
+    console.log('[tls] Self-signed certificate generated in', CERT_DIR);
+  } catch (err) {
+    // Remove partial files so next startup retries
+    try { fs.unlinkSync(keyFile); } catch (_) {}
+    try { fs.unlinkSync(certFile); } catch (_) {}
+    console.error('[tls] Failed to generate certificate. Is openssl installed?');
+    process.exit(1);
+  }
+}
 
 function getLocalIP() {
   const ifaces = os.networkInterfaces();
@@ -26,13 +56,17 @@ const AGENT_ARGS = (() => { try { return JSON.parse(process.env.AGENT_ARGS || '[
 // ---------------------------------------------------------------------------
 // Express + HTTP server (serves web page + WebSocket)
 // ---------------------------------------------------------------------------
+ensureCert();
+
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('*', (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-const httpServer = http.createServer(app);
+const httpServer = USE_HTTPS
+  ? https.createServer({ key: fs.readFileSync(path.join(CERT_DIR, 'key.pem')), cert: fs.readFileSync(path.join(CERT_DIR, 'cert.pem')) }, app)
+  : http.createServer(app);
 const wss = new WebSocketServer({ server: httpServer });
 
 // ---------------------------------------------------------------------------
@@ -101,7 +135,9 @@ let ptyExited = false;
 // Start HTTP server first, then take over terminal and spawn claude
 // ---------------------------------------------------------------------------
 httpServer.listen(HTTP_PORT, HTTP_HOST, () => {
-  console.log('[http] Web server at http://%s:%d', getLocalIP(), HTTP_PORT);
+  ensureCert();
+  const proto = USE_HTTPS ? 'https' : 'http';
+  console.log('[http] Web server at %s://%s:%d', proto, getLocalIP(), HTTP_PORT);
   console.log('[http] Open the URL above in a browser to mirror this session.');
   console.log('');
 

@@ -82,6 +82,69 @@
     }
 
     .text-center { text-align: center; }
+
+    /* Mic button */
+    .mic-btn {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 50;
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: none;
+      background: rgba(255,255,255,0.12);
+      color: rgba(255,255,255,0.7);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px;
+      transition: background 0.2s, color 0.2s, transform 0.2s;
+      outline: none;
+      will-change: transform;
+    }
+    .mic-btn:hover {
+      background: rgba(255,255,255,0.2);
+      color: #fff;
+    }
+    .mic-btn.recording {
+      background: rgba(220,50,50,0.25);
+      color: #e04646;
+      animation: mic-pulse 1.2s ease-in-out infinite;
+    }
+    .mic-btn.recording:hover {
+      background: rgba(220,50,50,0.35);
+    }
+    @keyframes mic-pulse {
+      0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(220,50,50,0.3); }
+      50% { transform: scale(1.08); box-shadow: 0 0 0 8px rgba(220,50,50,0); }
+    }
+
+    /* Voice input toast */
+    .voice-toast {
+      position: fixed;
+      bottom: 76px;
+      right: 24px;
+      z-index: 49;
+      max-width: 360px;
+      padding: 8px 14px;
+      border-radius: 6px;
+      background: rgba(30,30,30,0.92);
+      color: #d4d4d4;
+      font-family: 'Menlo', 'Consolas', 'Courier New', monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      pointer-events: none;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 0.25s ease, transform 0.25s ease;
+      word-break: break-all;
+    }
+    .voice-toast.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
   </style>
 </head>
 <body>
@@ -97,6 +160,16 @@
   </div>
 
   <div id="terminal-container"></div>
+
+  <div id="voice-toast" class="voice-toast"></div>
+
+  <button id="mic-btn" class="mic-btn" title="语音输入" aria-label="语音输入">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+      <line x1="12" y1="19" x2="12" y2="22"/>
+    </svg>
+  </button>
 
   <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
@@ -323,6 +396,130 @@
       });
 
       // -------------------------------------------------------------------
+      // Web Speech API — voice input
+      // -------------------------------------------------------------------
+      var micBtn = document.getElementById('mic-btn');
+      var voiceToast = document.getElementById('voice-toast');
+      var recognition = null;
+      var isRecording = false;
+      var idleTimer = null;
+      var pendingStart = null;
+      var toastTimer = null;
+      var IDLE_TIMEOUT = 15000;
+
+      function showVoiceToast(text) {
+        if (toastTimer) clearTimeout(toastTimer);
+        voiceToast.textContent = '🎤 ' + text;
+        voiceToast.classList.add('visible');
+        toastTimer = setTimeout(function () {
+          voiceToast.classList.remove('visible');
+          toastTimer = null;
+        }, 2000);
+      }
+
+      function stopRecording() {
+        isRecording = false;
+        if (pendingStart) { clearTimeout(pendingStart); pendingStart = null; }
+        if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+        if (micBtn) micBtn.classList.remove('recording');
+        if (recognition) {
+          try { recognition.stop(); } catch (_) {}
+        }
+      }
+
+      function startRecording() {
+        var RecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!RecognitionCtor) {
+          alert('浏览器不支持语音识别，请使用 Chrome/Edge 等基于 Chromium 的浏览器。');
+          return;
+        }
+
+        if (recognition) { try { recognition.abort(); } catch (_) {} }
+
+        var r = new RecognitionCtor();
+        recognition = r;
+        r.continuous = true;
+        r.interimResults = false;
+        r.lang = 'zh-CN';
+
+        function resetIdleTimer() {
+          if (idleTimer) clearTimeout(idleTimer);
+          idleTimer = setTimeout(stopRecording, IDLE_TIMEOUT);
+        }
+
+        r.onresult = function (event) {
+          resetIdleTimer();
+          var transcript = '';
+          for (var i = event.resultIndex; i < event.results.length; i++) {
+            if (event.results[i].isFinal) {
+              transcript += event.results[i][0].transcript;
+            }
+          }
+          if (transcript) {
+            showVoiceToast(transcript);
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'input', data: transcript }));
+            }
+          }
+        };
+
+        r.onerror = function (event) {
+          if (event.error === 'no-speech' || event.error === 'aborted') return;
+          stopRecording();
+        };
+
+        r.onend = function () {
+          if (r === recognition) recognition = null;
+          if (isRecording) {
+            try { r.start(); recognition = r; } catch (_) { stopRecording(); }
+          }
+        };
+
+        try {
+          r.start();
+          isRecording = true;
+          micBtn.classList.add('recording');
+          resetIdleTimer();
+        } catch (e) {
+          stopRecording();
+          alert('语音启动失败：' + e.message + '\n\n请确保：\n1. 使用 HTTPS 或 localhost 访问\n2. 已授予麦克风权限');
+        }
+      }
+
+      function beginPress() {
+        if (pendingStart) return;
+        pendingStart = setTimeout(function () {
+          pendingStart = null;
+          startRecording();
+        }, 300);
+      }
+
+      function endPress() {
+        if (pendingStart) {
+          clearTimeout(pendingStart);
+          pendingStart = null;
+          return;
+        }
+        stopRecording();
+      }
+
+      if (micBtn) {
+        micBtn.addEventListener('mousedown', function (e) {
+          e.preventDefault();
+          beginPress();
+        });
+        micBtn.addEventListener('mouseup', endPress);
+        micBtn.addEventListener('mouseleave', endPress);
+
+        micBtn.addEventListener('touchstart', function (e) {
+          e.preventDefault();
+          beginPress();
+        });
+        micBtn.addEventListener('touchend', endPress);
+        micBtn.addEventListener('touchcancel', endPress);
+      }
+
+      // -------------------------------------------------------------------
       // Prevent accidental browser tab close on Ctrl+N/W/T
       // -------------------------------------------------------------------
       container.addEventListener('keydown', function (e) {
@@ -339,6 +536,8 @@
       // Cleanup on page unload
       // -------------------------------------------------------------------
       window.addEventListener('beforeunload', function () {
+        if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
+        stopRecording();
         intentionalClose = true;
         cancelReconnect();
         if (ws) {
