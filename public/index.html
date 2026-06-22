@@ -86,7 +86,7 @@
     /* Floating action buttons (mic + enter), bottom-right */
     .action-btn {
       position: fixed;
-      bottom: 24px;
+      bottom: 34px;
       z-index: 50;
       width: 44px;
       height: 44px;
@@ -171,6 +171,53 @@
       opacity: 1;
       transform: translateY(0);
     }
+
+    /* Arrow key row — replaces mic/enter when IME is visible */
+    #arrow-row {
+      position: fixed;
+      right: 24px;
+      bottom: 34px;
+      z-index: 50;
+      display: flex;
+      gap: 8px;
+    }
+    #arrow-row.hidden {
+      display: none;
+    }
+    .arrow-btn {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: none;
+      background: rgba(255,255,255,0.12);
+      color: rgba(255,255,255,0.7);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      font-family: inherit;
+      outline: none;
+      transition: background 0.15s, color 0.15s, transform 0.15s;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .arrow-btn:active {
+      background: rgba(255,255,255,0.25);
+      color: #fff;
+      transform: scale(0.92);
+    }
+    @media (hover: hover) {
+      .arrow-btn:hover {
+        background: rgba(255,255,255,0.2);
+        color: #fff;
+      }
+    }
+
+    /* Hide action buttons when keyboard is visible */
+    .action-btn-hidden {
+      display: none !important;
+    }
   </style>
 </head>
 <body>
@@ -203,6 +250,13 @@
       <path d="M20 4v7a4 4 0 0 1-4 4H4"/>
     </svg>
   </button>
+
+  <div id="arrow-row" class="hidden">
+    <button class="arrow-btn" data-dir="left"  tabindex="-1" aria-label="左">←</button>
+    <button class="arrow-btn" data-dir="up"    tabindex="-1" aria-label="上">↑</button>
+    <button class="arrow-btn" data-dir="down"  tabindex="-1" aria-label="下">↓</button>
+    <button class="arrow-btn" data-dir="right" tabindex="-1" aria-label="右">→</button>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
@@ -567,6 +621,78 @@
           }
         });
       }
+
+      // -------------------------------------------------------------------
+      // Arrow key row — shown when IME/soft keyboard is open on touch devices
+      // Detect keyboard via xterm's hidden textarea focus.
+      // -------------------------------------------------------------------
+      var arrowRow = document.getElementById('arrow-row');
+      var isTouchDevice = 'ontouchend' in window;
+      var isSmallScreen = window.innerWidth < 768;
+
+      function isMobileKeyboard() {
+        return isTouchDevice && isSmallScreen;
+      }
+
+      function updateKeyboardUI(visible) {
+        if (visible && isMobileKeyboard()) {
+          micBtn && micBtn.classList.add('action-btn-hidden');
+          enterBtn && enterBtn.classList.add('action-btn-hidden');
+          arrowRow.classList.remove('hidden');
+        } else {
+          micBtn && micBtn.classList.remove('action-btn-hidden');
+          enterBtn && enterBtn.classList.remove('action-btn-hidden');
+          arrowRow.classList.add('hidden');
+        }
+      }
+
+      // Detect keyboard via visualViewport height changes
+      if (window.visualViewport) {
+        var detectKeyboard = function () {
+          var diff = window.innerHeight - window.visualViewport.height;
+          var isOpen = diff > 150;
+          updateKeyboardUI(isOpen);
+          if (isOpen) {
+            requestAnimationFrame(function () {
+              window.scrollTo(0, document.body.scrollHeight);
+            });
+          }
+        };
+        window.visualViewport.addEventListener('resize', detectKeyboard);
+      }
+
+      // Arrow key sequences
+      var ARROW_SEQ = {
+        left:  '\x1b[D',
+        right: '\x1b[C',
+        up:    '\x1b[A',
+        down:  '\x1b[B',
+      };
+
+      // preventDefault on mousedown stops focus stealing
+      arrowRow.addEventListener('mousedown', function (e) {
+        var btn = e.target.closest('.arrow-btn');
+        if (btn) e.preventDefault();
+      });
+
+      arrowRow.addEventListener('click', function (e) {
+        var btn = e.target.closest('.arrow-btn');
+        if (!btn) return;
+        var dir = btn.getAttribute('data-dir');
+        var seq = ARROW_SEQ[dir];
+        if (seq && ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'input', data: seq }));
+          term.focus();
+        }
+      });
+
+      // On screen resize, re-check if we're on a small screen
+      window.addEventListener('resize', function () {
+        isSmallScreen = window.innerWidth < 768;
+        if (!isMobileKeyboard()) {
+          updateKeyboardUI(false);
+        }
+      });
 
       // -------------------------------------------------------------------
       // Prevent accidental browser tab close on Ctrl+N/W/T
