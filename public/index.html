@@ -83,11 +83,10 @@
 
     .text-center { text-align: center; }
 
-    /* Mic button */
-    .mic-btn {
+    /* Floating action buttons (mic + enter), bottom-right */
+    .action-btn {
       position: fixed;
       bottom: 24px;
-      right: 24px;
       z-index: 50;
       width: 44px;
       height: 44px;
@@ -104,10 +103,13 @@
       outline: none;
       will-change: transform;
     }
-    .mic-btn:hover {
+    .action-btn:hover {
       background: rgba(255,255,255,0.2);
       color: #fff;
     }
+
+    /* Mic button sits to the left of the enter button */
+    .mic-btn { right: 76px; }
     .mic-btn.recording {
       background: rgba(220,50,50,0.25);
       color: #e04646;
@@ -121,11 +123,35 @@
       50% { transform: scale(1.08); box-shadow: 0 0 0 8px rgba(220,50,50,0); }
     }
 
+    /* Enter / confirm button, rightmost */
+    .enter-btn { right: 24px; }
+    .enter-btn:hover,
+    .enter-btn:focus {
+      background: rgba(86,156,214,0.25);
+      color: #569cd6;
+    }
+    .enter-btn:active {
+      transform: scale(0.92);
+    }
+    /* Mobile: tap leaves a sticky :hover. Neutralize it on hover-less
+       devices so the highlight doesn't linger after the tap is released. */
+    @media (hover: none) {
+      .enter-btn:hover {
+        background: rgba(255,255,255,0.12);
+        color: rgba(255,255,255,0.7);
+      }
+      .enter-btn:active {
+        background: rgba(86,156,214,0.25);
+        color: #569cd6;
+        transform: scale(0.92);
+      }
+    }
+
     /* Voice input toast */
     .voice-toast {
       position: fixed;
       bottom: 76px;
-      right: 24px;
+      right: 76px;
       z-index: 49;
       max-width: 360px;
       padding: 8px 14px;
@@ -163,11 +189,18 @@
 
   <div id="voice-toast" class="voice-toast"></div>
 
-  <button id="mic-btn" class="mic-btn" title="语音输入" aria-label="语音输入">
+  <button id="mic-btn" class="action-btn mic-btn" type="button" title="语音输入" aria-label="语音输入">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
       <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
       <line x1="12" y1="19" x2="12" y2="22"/>
+    </svg>
+  </button>
+
+  <button id="enter-btn" class="action-btn enter-btn" type="button" tabindex="-1" title="确认 (Enter)" aria-label="确认 (Enter)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="9 10 4 15 9 20"/>
+      <path d="M20 4v7a4 4 0 0 1-4 4H4"/>
     </svg>
   </button>
 
@@ -515,6 +548,24 @@
         });
         micBtn.addEventListener('touchend', endPress);
         micBtn.addEventListener('touchcancel', endPress);
+      }
+
+      // -------------------------------------------------------------------
+      // Enter / confirm button — submit the current prompt line to the PTY.
+      // preventDefault on mousedown stops the click from stealing focus and
+      // refocusing xterm's hidden <textarea>, which would otherwise pop up
+      // the IME / soft keyboard right after sending Enter.
+      // -------------------------------------------------------------------
+      var enterBtn = document.getElementById('enter-btn');
+      if (enterBtn) {
+        enterBtn.addEventListener('mousedown', function (e) {
+          e.preventDefault();
+        });
+        enterBtn.addEventListener('click', function () {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'input', data: '\r' }));
+          }
+        });
       }
 
       // -------------------------------------------------------------------
