@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 const os = require('os');
 const fs = require('fs');
 const express = require('express');
@@ -9,11 +10,91 @@ const { WebSocketServer } = require('ws');
 const { spawn } = require('node-pty');
 
 // ---------------------------------------------------------------------------
+// CLI argument parsing
+// ---------------------------------------------------------------------------
+const AGENT_MAP = {
+  'claude':    'claude',
+  'opencode':  'opencode',
+  'codex':     'codex',
+  'kiro':      'kiro-cli',
+  'kiro-cli':  'kiro-cli',
+};
+
+function printHelp() {
+  const agents = Object.keys(AGENT_MAP).join(', ');
+  console.log(`
+agent-web-bridge — bridge a local agent CLI session to the browser.
+
+USAGE
+  agent-web-bridge [options]
+
+OPTIONS
+  -h, --help            Show this help message and exit.
+      --port=<port>     HTTP/WebSocket port (default: 3001, or $PORT).
+      --https           Enable HTTPS with a self-signed certificate.
+      --agent=<name>    Agent to launch. Supported: ${agents}.
+                        Default: claude.
+      --args="<...>"    Extra arguments forwarded to the agent, space-separated.
+
+ENVIRONMENT
+  PORT          Overrides the default port (same as --port).
+  HTTPS         Set to "true" to enable HTTPS (same as --https).
+
+EXAMPLES
+  agent-web-bridge
+  agent-web-bridge --port=4000 --agent=opencode
+  agent-web-bridge --agent=codex --args="--model gpt-5"
+  PORT=4000 agent-web-bridge
+`.trim());
+}
+
+let HTTP_PORT = parseInt(process.env.PORT, 10) || 3001;
+let HTTP_HOST = process.env.HOST || '0.0.0.0';
+let USE_HTTPS = process.env.HTTPS === 'true';
+let AGENT_BIN = process.env.AGENT_BIN || (process.env.HOME && `${process.env.HOME}/.local/bin/claude`);
+let AGENT_ARGS = [];
+
+const cliArgs = process.argv.slice(2);
+for (let i = 0; i < cliArgs.length; i++) {
+  if (cliArgs[i] === '--help' || cliArgs[i] === '-h') {
+    printHelp();
+    process.exit(0);
+  } else if (cliArgs[i] === '--https') {
+    USE_HTTPS = true;
+  } else if (cliArgs[i] === '--port') {
+    if (!cliArgs[i + 1] || cliArgs[i + 1].startsWith('--')) {
+      console.error('--port requires a port number');
+      process.exit(1);
+    }
+    const p = parseInt(cliArgs[i + 1], 10);
+    if (isNaN(p) || p < 1 || p > 65535) {
+      console.error('Invalid port number:', cliArgs[i + 1]);
+      process.exit(1);
+    }
+    HTTP_PORT = p;
+    i++;
+  } else if (cliArgs[i].startsWith('--port=')) {
+    const p = parseInt(cliArgs[i].split('=')[1], 10);
+    if (isNaN(p) || p < 1 || p > 65535) {
+      console.error('Invalid port number:', cliArgs[i].split('=')[1]);
+      process.exit(1);
+    }
+    HTTP_PORT = p;
+  } else if (cliArgs[i].startsWith('--agent=')) {
+    const name = cliArgs[i].split('=')[1];
+    if (!AGENT_MAP[name]) {
+      console.error('Unknown agent:', name, '(supported: ' + Object.keys(AGENT_MAP).join(', ') + ')');
+      process.exit(1);
+    }
+    AGENT_BIN = AGENT_MAP[name];
+  } else if (cliArgs[i].startsWith('--args=')) {
+    AGENT_ARGS = cliArgs[i].split('=')[1].split(' ').filter(Boolean);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
-const HTTP_PORT = process.env.PORT || 3001;
-const HTTP_HOST = process.env.HOST || '0.0.0.0';
-const USE_HTTPS = process.env.HTTPS === 'true';
 const CERT_DIR = path.join(process.env.HOME || process.cwd(), '.config', 'agent-web-bridge');
 
 function ensureCert() {
@@ -33,7 +114,6 @@ function ensureCert() {
     ], { stdio: 'pipe' });
     console.log('[tls] Self-signed certificate generated in', CERT_DIR);
   } catch (err) {
-    // Remove partial files so next startup retries
     try { fs.unlinkSync(keyFile); } catch (_) {}
     try { fs.unlinkSync(certFile); } catch (_) {}
     console.error('[tls] Failed to generate certificate. Is openssl installed?');
@@ -50,8 +130,6 @@ function getLocalIP() {
   }
   return HTTP_HOST;
 }
-const AGENT_BIN = process.env.CLAUDE_BIN || (process.env.HOME && `${process.env.HOME}/.local/bin/claude`);
-const AGENT_ARGS = (() => { try { return JSON.parse(process.env.AGENT_ARGS || '[]'); } catch { return []; } })();
 
 // ---------------------------------------------------------------------------
 // Express + HTTP server (serves web page + WebSocket)
@@ -111,15 +189,12 @@ function broadcastControlToWeb(jsonMsg) {
 
 wss.on('connection', (ws) => {
   wsClients.add(ws);
-  console.log('[ws] Web client connected (%d total)', wsClients.size);
-
   // Send buffered PTY output to newly connecting client
   if (ptyBufferTotal > 0) {
     const buf = getPtyBuffer();
     if (buf) {
       try {
         ws.send(JSON.stringify({ type: 'data', data: buf }));
-        console.log('[ws] Sent buffer (%d bytes) to new client', buf.length);
       } catch (_) {}
     }
   }
@@ -145,7 +220,6 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     wsClients.delete(ws);
-    console.log('[ws] Web client disconnected (%d total)', wsClients.size);
   });
 
   ws.on('error', () => {
