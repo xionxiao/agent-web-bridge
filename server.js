@@ -32,18 +32,21 @@ OPTIONS
   -h, --help            Show this help message and exit.
       --port=<port>     HTTP/WebSocket port (default: 3001, or $PORT).
       --https           Enable HTTPS with a self-signed certificate.
+      --auth=<token>    Require ?token=<token> to access the WebSocket.
       --agent=<name>    Agent to launch. Supported: ${agents}.
                         Default: claude.
-      --args="<...>"    Extra arguments forwarded to the agent, space-separated.
+      --args=<args>     Extra arguments forwarded to the agent, space-separated.
 
 ENVIRONMENT
   PORT          Overrides the default port (same as --port).
+  HOST          Bind address, default 0.0.0.0 (same as --host).
   HTTPS         Set to "true" to enable HTTPS (same as --https).
 
 EXAMPLES
   agent-web-bridge
   agent-web-bridge --port=4000 --agent=opencode
   agent-web-bridge --agent=codex --args="--model gpt-5"
+  agent-web-bridge --auth=mysecret
   PORT=4000 agent-web-bridge
 `.trim());
 }
@@ -53,6 +56,7 @@ let HTTP_HOST = process.env.HOST || '0.0.0.0';
 let USE_HTTPS = process.env.HTTPS === 'true';
 let AGENT_BIN = process.env.AGENT_BIN || (process.env.HOME && `${process.env.HOME}/.local/bin/claude`);
 let AGENT_ARGS = [];
+let AUTH_TOKEN = '';
 
 const cliArgs = process.argv.slice(2);
 for (let i = 0; i < cliArgs.length; i++) {
@@ -61,18 +65,6 @@ for (let i = 0; i < cliArgs.length; i++) {
     process.exit(0);
   } else if (cliArgs[i] === '--https') {
     USE_HTTPS = true;
-  } else if (cliArgs[i] === '--port') {
-    if (!cliArgs[i + 1] || cliArgs[i + 1].startsWith('--')) {
-      console.error('--port requires a port number');
-      process.exit(1);
-    }
-    const p = parseInt(cliArgs[i + 1], 10);
-    if (isNaN(p) || p < 1 || p > 65535) {
-      console.error('Invalid port number:', cliArgs[i + 1]);
-      process.exit(1);
-    }
-    HTTP_PORT = p;
-    i++;
   } else if (cliArgs[i].startsWith('--port=')) {
     const p = parseInt(cliArgs[i].split('=')[1], 10);
     if (isNaN(p) || p < 1 || p > 65535) {
@@ -87,6 +79,8 @@ for (let i = 0; i < cliArgs.length; i++) {
       process.exit(1);
     }
     AGENT_BIN = AGENT_MAP[name];
+  } else if (cliArgs[i].startsWith('--auth=')) {
+    AUTH_TOKEN = cliArgs[i].split('=')[1];
   } else if (cliArgs[i].startsWith('--args=')) {
     AGENT_ARGS = cliArgs[i].split('=')[1].split(' ').filter(Boolean);
   }
@@ -187,7 +181,14 @@ function broadcastControlToWeb(jsonMsg) {
   }
 }
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
+  if (AUTH_TOKEN) {
+    const params = new URL(req.url, 'http://localhost').searchParams;
+    if (params.get('token') !== AUTH_TOKEN) {
+      ws.close(4001, 'Unauthorized');
+      return;
+    }
+  }
   wsClients.add(ws);
   // Send buffered PTY output to newly connecting client
   if (ptyBufferTotal > 0) {

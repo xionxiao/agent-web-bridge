@@ -7,24 +7,22 @@ Mirror your local agent CLI session to any browser via WebSocket.
 **Prerequisite:** `node-pty` is a native module — you need `make`, `gcc`/`clang`, and `python3` installed for `npm install` to compile it.
 
 ```bash
-# Install globally from GitHub, then run
+# Run directly (server.js is the CLI entry point)
+node server.js
+
+# Or install globally
 npm install -g github:xionxiao/agent-web-bridge
 agent-web-bridge
 
-# Or run directly without installing (auto-caches)
+# Or run via npx
 npx github:xionxiao/agent-web-bridge
 
-# Custom port
-npx github:xionxiao/agent-web-bridge --port 4000
-
-# Choose agent (claude or opencode)
-npx github:xionxiao/agent-web-bridge --agent=opencode
-
-# Pass extra arguments to agent
-npx github:xionxiao/agent-web-bridge --agent=opencode --args="--model=gpt-4"
-
-# Custom agent binary path
-AGENT_BIN=/path/to/claude npx github:xionxiao/agent-web-bridge
+# Options
+node server.js --port=4000 --agent=opencode --args="--model=gpt-4"
+node server.js --auth=mysecret                          # require ?token=mysecret
+node server.js --https                                  # enable HTTPS
+AGENT_BIN=/path/to/agent node server.js                 # custom binary
+PORT=4000 HOST=127.0.0.1 node server.js                 # env vars
 ```
 
-Then open `http://localhost:3001`.
+Then open `http://localhost:3001`. If `--auth` is set, append `?token=mysecret` to the URL.

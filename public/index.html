@@ -397,8 +397,9 @@
         intentionalClose = false;
         showOverlay(true, 'Connecting...', false);
 
+        var token = new URL(window.location.href).searchParams.get('token') || '';
         var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        var wsUrl = protocol + '//' + window.location.host;
+        var wsUrl = protocol + '//' + window.location.host + (token ? '?token=' + encodeURIComponent(token) : '');
 
         ws = new WebSocket(wsUrl);
 
