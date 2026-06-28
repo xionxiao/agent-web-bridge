@@ -6,6 +6,8 @@ Mirror your local agent CLI session to any browser via WebSocket.
 
 **Prerequisite:** `node-pty` is a native module — you need `make`, `gcc`/`clang`, and `python3` installed for `npm install` to compile it.
 
+> **Windows users:** Install [Windows Build Tools](https://github.com/felixrieseberg/windows-build-tools) or run `npm install --vs2022` with Visual Studio 2022 Build Tools. OpenSSL is also required for `--https` — install via [Chocolatey](https://chocolatey.org/) (`choco install openssl`) or use a prebuilt binary.
+
 ```bash
 # Run directly (server.js is the CLI entry point)
 node server.js

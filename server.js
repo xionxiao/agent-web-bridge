@@ -54,7 +54,7 @@ EXAMPLES
 let HTTP_PORT = parseInt(process.env.PORT, 10) || 3001;
 let HTTP_HOST = process.env.HOST || '0.0.0.0';
 let USE_HTTPS = process.env.HTTPS === 'true';
-let AGENT_BIN = process.env.AGENT_BIN || (process.env.HOME && `${process.env.HOME}/.local/bin/claude`);
+let AGENT_BIN = process.env.AGENT_BIN || 'claude';
 let AGENT_ARGS = [];
 let AUTH_TOKEN = '';
 
@@ -89,7 +89,7 @@ for (let i = 0; i < cliArgs.length; i++) {
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
-const CERT_DIR = path.join(process.env.HOME || process.cwd(), '.config', 'agent-web-bridge');
+const CERT_DIR = path.join(os.homedir(), '.config', 'agent-web-bridge');
 
 function ensureCert() {
   if (!USE_HTTPS) return;
@@ -98,7 +98,9 @@ function ensureCert() {
   if (fs.existsSync(keyFile) && fs.existsSync(certFile)) return;
 
   fs.mkdirSync(CERT_DIR, { recursive: true });
-  const subj = `/CN=${HTTP_HOST === '0.0.0.0' ? 'localhost' : HTTP_HOST}`;
+  const subj = os.platform() === 'win32'
+    ? `//CN=${HTTP_HOST === '0.0.0.0' ? 'localhost' : HTTP_HOST}`
+    : `/CN=${HTTP_HOST === '0.0.0.0' ? 'localhost' : HTTP_HOST}`;
   try {
     execFileSync('openssl', [
       'req', '-x509', '-newkey', 'rsa:2048',
@@ -253,8 +255,19 @@ function startPty() {
   const cols = process.stdout.columns || 80;
   const rows = process.stdout.rows || 24;
 
+  let bin = AGENT_BIN;
+  let args = AGENT_ARGS;
+
+  if (os.platform() === 'win32') {
+    const ext = path.extname(bin).toLowerCase();
+    if (!ext || ext === '.cmd' || ext === '.bat') {
+      bin = 'cmd.exe';
+      args = ['/c', AGENT_BIN, ...AGENT_ARGS];
+    }
+  }
+
   try {
-    ptyProcess = spawn(AGENT_BIN, AGENT_ARGS, {
+    ptyProcess = spawn(bin, args, {
       name: 'xterm-256color',
       cols,
       rows,
