@@ -109,7 +109,7 @@
     }
 
     /* Mic button sits to the left of the enter button */
-    .mic-btn { right: 76px; }
+    .mic-btn { right: 128px; }
     .mic-btn.recording {
       background: rgba(220,50,50,0.25);
       color: #e04646;
@@ -121,6 +121,28 @@
     @keyframes mic-pulse {
       0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(220,50,50,0.3); }
       50% { transform: scale(1.08); box-shadow: 0 0 0 8px rgba(220,50,50,0); }
+    }
+
+    /* Cancel button, between mic and enter */
+    .cancel-btn { right: 76px; }
+    .cancel-btn:hover,
+    .cancel-btn:focus {
+      background: rgba(220,50,50,0.2);
+      color: #e04646;
+    }
+    .cancel-btn:active {
+      transform: scale(0.92);
+    }
+    @media (hover: none) {
+      .cancel-btn:hover {
+        background: rgba(255,255,255,0.12);
+        color: rgba(255,255,255,0.7);
+      }
+      .cancel-btn:active {
+        background: rgba(220,50,50,0.25);
+        color: #e04646;
+        transform: scale(0.92);
+      }
     }
 
     /* Enter / confirm button, rightmost */
@@ -241,6 +263,13 @@
       <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
       <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
       <line x1="12" y1="19" x2="12" y2="22"/>
+    </svg>
+  </button>
+
+  <button id="cancel-btn" class="action-btn cancel-btn" type="button" tabindex="-1" title="取消 (Esc)" aria-label="取消 (Esc)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="18" y1="6" x2="6" y2="18"/>
+      <line x1="6" y1="6" x2="18" y2="18"/>
     </svg>
   </button>
 
@@ -624,6 +653,21 @@
       }
 
       // -------------------------------------------------------------------
+      // Cancel button — send ESC
+      // -------------------------------------------------------------------
+      var cancelBtn = document.getElementById('cancel-btn');
+      if (cancelBtn) {
+        cancelBtn.addEventListener('mousedown', function (e) {
+          e.preventDefault();
+        });
+        cancelBtn.addEventListener('click', function () {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'input', data: '\x1b' }));
+          }
+        });
+      }
+
+      // -------------------------------------------------------------------
       // Arrow key row — shown when IME/soft keyboard is open on touch devices
       // Detect keyboard via xterm's hidden textarea focus.
       // -------------------------------------------------------------------
@@ -638,10 +682,12 @@
       function updateKeyboardUI(visible) {
         if (visible && isMobileKeyboard()) {
           micBtn && micBtn.classList.add('action-btn-hidden');
+          cancelBtn && cancelBtn.classList.add('action-btn-hidden');
           enterBtn && enterBtn.classList.add('action-btn-hidden');
           arrowRow.classList.remove('hidden');
         } else {
           micBtn && micBtn.classList.remove('action-btn-hidden');
+          cancelBtn && cancelBtn.classList.remove('action-btn-hidden');
           enterBtn && enterBtn.classList.remove('action-btn-hidden');
           arrowRow.classList.add('hidden');
         }
