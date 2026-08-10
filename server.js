@@ -30,7 +30,8 @@ USAGE
 
 OPTIONS
   -h, --help            Show this help message and exit.
-      --port=<port>     HTTP/WebSocket port (default: 3001, or $PORT).
+      --port=<port>     HTTP/WebSocket port (default: 13001, or $PORT).
+                        If the port is in use, it is incremented by 1 until free.
       --https           Enable HTTPS with a self-signed certificate.
       --auth=<token>    Require ?token=<token> to access the WebSocket.
       --agent=<name>    Agent to launch. Built-in: ${agents}.
@@ -52,7 +53,7 @@ EXAMPLES
 `.trim());
 }
 
-let HTTP_PORT = parseInt(process.env.PORT, 10) || 3001;
+let HTTP_PORT = parseInt(process.env.PORT, 10) || 13001;
 let HTTP_HOST = process.env.HOST || '0.0.0.0';
 let USE_HTTPS = process.env.HTTPS === 'true';
 let AGENT_BIN = process.env.AGENT_BIN || 'claude';
@@ -239,10 +240,20 @@ app.get('*', (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-const httpServer = USE_HTTPS
-  ? https.createServer({ key: fs.readFileSync(path.join(CERT_DIR, 'key.pem')), cert: fs.readFileSync(path.join(CERT_DIR, 'cert.pem')) }, app)
-  : http.createServer(app);
-const wss = new WebSocketServer({ server: httpServer });
+let httpServer;
+let wss;
+
+function createServer() {
+  const server = USE_HTTPS
+    ? https.createServer({ key: fs.readFileSync(path.join(CERT_DIR, 'key.pem')), cert: fs.readFileSync(path.join(CERT_DIR, 'cert.pem')) }, app)
+    : http.createServer(app);
+  const wsServer = new WebSocketServer({ server });
+  // ws re-emits server errors on the WSS instance; swallow them so the
+  // fallback port logic in the http server can handle EADDRINUSE.
+  wsServer.on('error', () => {});
+  setupWss(wsServer);
+  return { server, wsServer };
+}
 
 // ---------------------------------------------------------------------------
 // WebSocket clients (web mirrors)
@@ -284,52 +295,54 @@ function broadcastControlToWeb(jsonMsg) {
   }
 }
 
-wss.on('connection', (ws, req) => {
-  if (AUTH_TOKEN) {
-    const params = new URL(req.url, 'http://localhost').searchParams;
-    if (params.get('token') !== AUTH_TOKEN) {
-      ws.close(4001, 'Unauthorized');
-      return;
-    }
-  }
-  wsClients.add(ws);
-  // Send buffered PTY output to newly connecting client
-  if (ptyBufferTotal > 0) {
-    const buf = getPtyBuffer();
-    if (buf) {
-      try {
-        ws.send(JSON.stringify({ type: 'data', data: buf }));
-      } catch (_) {}
-    }
-  }
-
-  ws.on('message', (raw) => {
-    let msg;
-    try { msg = JSON.parse(raw.toString()); } catch (_) { return; }
-
-    if (msg.type === 'input' && ptyProcess && !ptyExited) {
-      ptyProcess.write(msg.data);
-    } else if (msg.type === 'resize') {
-      const { cols, rows } = msg;
-      if (
-        typeof cols === 'number' && typeof rows === 'number' &&
-        cols >= 2 && rows >= 2 && cols <= 500 && rows <= 500
-      ) {
-        if (ptyProcess && !ptyExited) {
-          try { ptyProcess.resize(cols, rows); } catch (_) {}
-        }
+function setupWss(wsServer) {
+  wsServer.on('connection', (ws, req) => {
+    if (AUTH_TOKEN) {
+      const params = new URL(req.url, 'http://localhost').searchParams;
+      if (params.get('token') !== AUTH_TOKEN) {
+        ws.close(4001, 'Unauthorized');
+        return;
       }
     }
-  });
+    wsClients.add(ws);
+    // Send buffered PTY output to newly connecting client
+    if (ptyBufferTotal > 0) {
+      const buf = getPtyBuffer();
+      if (buf) {
+        try {
+          ws.send(JSON.stringify({ type: 'data', data: buf }));
+        } catch (_) {}
+      }
+    }
 
-  ws.on('close', () => {
-    wsClients.delete(ws);
-  });
+    ws.on('message', (raw) => {
+      let msg;
+      try { msg = JSON.parse(raw.toString()); } catch (_) { return; }
 
-  ws.on('error', () => {
-    wsClients.delete(ws);
+      if (msg.type === 'input' && ptyProcess && !ptyExited) {
+        ptyProcess.write(msg.data);
+      } else if (msg.type === 'resize') {
+        const { cols, rows } = msg;
+        if (
+          typeof cols === 'number' && typeof rows === 'number' &&
+          cols >= 2 && rows >= 2 && cols <= 500 && rows <= 500
+        ) {
+          if (ptyProcess && !ptyExited) {
+            try { ptyProcess.resize(cols, rows); } catch (_) {}
+          }
+        }
+      }
+    });
+
+    ws.on('close', () => {
+      wsClients.delete(ws);
+    });
+
+    ws.on('error', () => {
+      wsClients.delete(ws);
+    });
   });
-});
+}
 
 // ---------------------------------------------------------------------------
 // PTY state
@@ -340,14 +353,36 @@ let ptyExited = false;
 // ---------------------------------------------------------------------------
 // Start HTTP server first, then take over terminal and spawn claude
 // ---------------------------------------------------------------------------
-httpServer.listen(HTTP_PORT, HTTP_HOST, () => {
-  const proto = USE_HTTPS ? 'https' : 'http';
-  console.log('[http] Web server at %s://%s:%d', proto, getLocalIP(), HTTP_PORT);
-  console.log('[http] Open the URL above in a browser to mirror this session.');
-  console.log('');
+function listenWithFallback(port) {
+  if (port > 65535) {
+    console.error('[http] No free port found between 13001 and 65535.');
+    process.exit(1);
+  }
+  const created = createServer();
+  created.server.once('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn('[http] Port %d is in use, trying port %d...', port, port + 1);
+      listenWithFallback(port + 1);
+    } else {
+      console.error('[http] Failed to start server:', err.message);
+      process.exit(1);
+    }
+  });
 
-  startPty();
-});
+  created.server.listen(port, HTTP_HOST, () => {
+    httpServer = created.server;
+    wss = created.wsServer;
+    HTTP_PORT = port;
+    const proto = USE_HTTPS ? 'https' : 'http';
+    console.log('[http] Web server at %s://%s:%d', proto, getLocalIP(), HTTP_PORT);
+    console.log('[http] Open the URL above in a browser to mirror this session.');
+    console.log('');
+
+    startPty();
+  });
+}
+
+listenWithFallback(HTTP_PORT);
 
 // ---------------------------------------------------------------------------
 // Spawn claude PTY, pipe terminal stdio, broadcast to web
@@ -449,8 +484,8 @@ function shutdown(code) {
   }
 
   // Close servers
-  wss.close();
-  httpServer.close();
+  if (wss) wss.close();
+  if (httpServer) httpServer.close();
 
   process.exit(code || 0);
 }

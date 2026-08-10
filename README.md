@@ -27,4 +27,4 @@ AGENT_BIN=/path/to/agent node server.js                 # custom binary
 PORT=4000 HOST=127.0.0.1 node server.js                 # env vars
 ```
 
-Then open `http://localhost:3001`. If `--auth` is set, append `?token=mysecret` to the URL.
+Then open `http://localhost:13001`. If the port is in use, it is incremented by 1 until a free port is found (the log shows the actual port). If `--auth` is set, append `?token=mysecret` to the URL.
