@@ -33,7 +33,8 @@ OPTIONS
       --port=<port>     HTTP/WebSocket port (default: 3001, or $PORT).
       --https           Enable HTTPS with a self-signed certificate.
       --auth=<token>    Require ?token=<token> to access the WebSocket.
-      --agent=<name>    Agent to launch. Supported: ${agents}.
+      --agent=<name>    Agent to launch. Built-in: ${agents}.
+                        Unknown names are passed through as a command.
                         Default: claude.
       --args=<args>     Extra arguments forwarded to the agent, space-separated.
 
@@ -74,11 +75,7 @@ for (let i = 0; i < cliArgs.length; i++) {
     HTTP_PORT = p;
   } else if (cliArgs[i].startsWith('--agent=')) {
     const name = cliArgs[i].split('=')[1];
-    if (!AGENT_MAP[name]) {
-      console.error('Unknown agent:', name, '(supported: ' + Object.keys(AGENT_MAP).join(', ') + ')');
-      process.exit(1);
-    }
-    AGENT_BIN = AGENT_MAP[name];
+    AGENT_BIN = AGENT_MAP[name] || name;
   } else if (cliArgs[i].startsWith('--auth=')) {
     AUTH_TOKEN = cliArgs[i].split('=')[1];
   } else if (cliArgs[i].startsWith('--args=')) {
