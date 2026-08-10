@@ -131,6 +131,110 @@ ensureCert();
 
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ---------------------------------------------------------------------------
+// File browser API (restricted to the server working directory)
+// ---------------------------------------------------------------------------
+const FS_ROOT = process.cwd();
+const FS_READ_MAX = 1024 * 1024;      // cap file reads at 1MB
+const FS_BINARY_SCAN = 8 * 1024;      // scan first 8KB for binary detection
+
+function apiAuthorized(req) {
+  if (!AUTH_TOKEN) return true;
+  const params = new URL(req.url, 'http://localhost').searchParams;
+  return params.get('token') === AUTH_TOKEN;
+}
+
+function safeResolve(input) {
+  if (input == null) input = '.';
+  if (typeof input !== 'string' || input.length > 4096) return null;
+  const full = path.resolve(FS_ROOT, input || '.');
+  let real = null;
+  try { real = fs.realpathSync(full); } catch (_) {}
+  const target = real || full;
+  if (target !== FS_ROOT && !target.startsWith(FS_ROOT + path.sep)) return null;
+  return target;
+}
+
+function isHidden(p) {
+  return /^\./.test(path.basename(p));
+}
+
+app.get('/api/list', (req, res) => {
+  if (!apiAuthorized(req)) return res.status(401).json({ error: 'Unauthorized' });
+
+  const rel = req.query.rel;
+  const dir = safeResolve(rel);
+  if (!dir) return res.status(400).json({ error: 'Invalid path' });
+
+  let stat;
+  try { stat = fs.statSync(dir); } catch (_) { return res.status(404).json({ error: 'Not found' }); }
+  if (!stat.isDirectory()) return res.status(400).json({ error: 'Not a directory' });
+
+  let names;
+  try { names = fs.readdirSync(dir); } catch (err) { return res.status(500).json({ error: err.message }); }
+
+  const entries = [];
+  for (const name of names) {
+    const abs = path.join(dir, name);
+    let st;
+    try { st = fs.statSync(abs); } catch (_) { continue; }
+    entries.push({
+      name,
+      rel: path.relative(FS_ROOT, abs),
+      isDir: st.isDirectory(),
+      size: st.size,
+      hidden: isHidden(abs),
+    });
+  }
+
+  entries.sort((a, b) => {
+    if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  res.json({
+    cwd: path.relative(FS_ROOT, dir) || '.',
+    entries,
+  });
+});
+
+app.get('/api/file', (req, res) => {
+  if (!apiAuthorized(req)) return res.status(401).json({ error: 'Unauthorized' });
+
+  const rel = req.query.rel;
+  const file = safeResolve(rel);
+  if (!file) return res.status(400).json({ error: 'Invalid path' });
+
+  let stat;
+  try { stat = fs.statSync(file); } catch (_) { return res.status(404).json({ error: 'Not found' }); }
+  if (!stat.isFile()) return res.status(400).json({ error: 'Not a file' });
+
+  const fd = fs.openSync(file, 'r');
+  const buf = Buffer.alloc(Math.min(FS_READ_MAX, stat.size));
+  let bytes = 0;
+  try { bytes = fs.readSync(fd, buf, 0, buf.length, 0); } catch (err) {
+    fs.closeSync(fd);
+    return res.status(500).json({ error: err.message });
+  }
+  fs.closeSync(fd);
+
+  const head = buf.subarray(0, Math.min(FS_BINARY_SCAN, bytes));
+  const binary = head.includes(0);
+
+  let content = '';
+  if (!binary) content = buf.subarray(0, bytes).toString('utf8');
+
+  res.json({
+    name: path.basename(file),
+    rel: path.relative(FS_ROOT, file),
+    size: stat.size,
+    binary,
+    truncated: stat.size > bytes,
+    content,
+  });
+});
+
 app.get('*', (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });

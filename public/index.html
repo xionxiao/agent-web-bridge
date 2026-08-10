@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Agent Web Bridge</title>
 
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
+  <link rel="stylesheet" href="vendor/xterm.min.css">
+  <link rel="stylesheet" href="vendor/github-dark.min.css">
 
   <style>
     *, *::before, *::after {
@@ -240,6 +241,255 @@
     .action-btn-hidden {
       display: none !important;
     }
+
+    /* ------------------------------------------------------------------ */
+    /* File browser — folder toggle button (top-right)                     */
+    /* ------------------------------------------------------------------ */
+    #file-toggle {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      z-index: 60;
+      width: 40px;
+      height: 40px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.1);
+      color: rgba(255,255,255,0.85);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 9px;
+      transition: background 0.2s, color 0.2s, transform 0.15s;
+      outline: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #file-toggle:hover {
+      background: rgba(255,255,255,0.22);
+      color: #fff;
+    }
+    #file-toggle:active {
+      transform: scale(0.92);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* File browser — right slide-in panel                                 */
+    /* ------------------------------------------------------------------ */
+    .file-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.4);
+      z-index: 70;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease;
+    }
+    .file-backdrop.visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    #file-panel {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 80;
+      width: min(340px, 88vw);
+      background: #1e1e1e;
+      border-left: 1px solid #3c3c3c;
+      display: flex;
+      flex-direction: column;
+      transform: translateX(100%);
+      transition: transform 0.28s ease;
+      box-shadow: -8px 0 24px rgba(0,0,0,0.4);
+    }
+    #file-panel.visible {
+      transform: translateX(0);
+    }
+
+    .file-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-bottom: 1px solid #333;
+      background: #252526;
+      flex-shrink: 0;
+    }
+    .file-bar .file-close {
+      width: 30px;
+      height: 30px;
+      flex-shrink: 0;
+      border: none;
+      background: transparent;
+      color: rgba(255,255,255,0.8);
+      cursor: pointer;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 6px;
+      transition: background 0.15s, color 0.15s;
+    }
+    .file-bar .file-close:hover {
+      background: rgba(255,255,255,0.15);
+      color: #fff;
+    }
+    #file-breadcrumb {
+      flex: 1;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      color: #d4d4d4;
+      font-family: 'Menlo', 'Consolas', 'Courier New', monospace;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      min-width: 0;
+    }
+    #file-breadcrumb .crumb {
+      cursor: pointer;
+      color: #569cd6;
+      padding: 1px 3px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+    #file-breadcrumb .crumb:hover {
+      background: rgba(255,255,255,0.1);
+    }
+    #file-breadcrumb .crumb-sep {
+      color: #808080;
+      flex-shrink: 0;
+    }
+    #file-breadcrumb .crumb-current {
+      color: #d4d4d4;
+      cursor: default;
+    }
+
+    #file-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 6px 0;
+    }
+    .file-entry {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      cursor: pointer;
+      color: #d4d4d4;
+      font-family: 'Menlo', 'Consolas', 'Courier New', monospace;
+      font-size: 13px;
+      user-select: none;
+      white-space: nowrap;
+    }
+    .file-entry:hover {
+      background: rgba(255,255,255,0.07);
+    }
+    .file-entry .fe-icon {
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+      color: #808080;
+    }
+    .file-entry.dir .fe-icon {
+      color: #d7ba7d;
+    }
+    .file-entry .fe-name {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .file-entry .fe-size {
+      color: #6a9955;
+      font-size: 11px;
+      flex-shrink: 0;
+    }
+    .file-entry.up {
+      color: #569cd6;
+    }
+
+    #file-error {
+      padding: 16px 12px;
+      color: #808080;
+      font-family: 'Menlo', 'Consolas', 'Courier New', monospace;
+      font-size: 13px;
+    }
+    #file-error { color: #f48771; }
+
+    /* ------------------------------------------------------------------ */
+    /* File viewer — full-screen overlay, does not affect main layout      */
+    /* ------------------------------------------------------------------ */
+    #file-viewer {
+      position: fixed;
+      inset: 0;
+      z-index: 90;
+      background: #1e1e1e;
+      display: flex;
+      flex-direction: column;
+      opacity: 0;
+      transform: translateY(14px) scale(0.98);
+      pointer-events: none;
+      transition: opacity 0.22s ease, transform 0.22s ease;
+    }
+    #file-viewer.visible {
+      opacity: 1;
+      transform: none;
+      pointer-events: auto;
+    }
+    #file-viewer .file-bar {
+      padding: 6px 10px;
+    }
+    #file-viewer .file-bar .file-title {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: #d4d4d4;
+      font-family: 'Menlo', 'Consolas', 'Courier New', monospace;
+      font-size: 13px;
+    }
+    #file-viewer .file-bar .file-badge {
+      flex-shrink: 0;
+      font-size: 11px;
+      color: #808080;
+      background: rgba(255,255,255,0.08);
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-family: 'Menlo', 'Consolas', 'Courier New', monospace;
+    }
+    #file-viewer pre {
+      flex: 1;
+      margin: 0;
+      padding: 12px 16px;
+      overflow: auto;
+      font-family: 'Menlo', 'Consolas', 'DejaVu Sans Mono', monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      tab-size: 2;
+      background: #1e1e1e;
+      color: #d4d4d4;
+    }
+    #file-viewer pre code {
+      background: transparent;
+      font-family: inherit;
+      padding: 0;
+      white-space: pre;
+    }
+    #file-viewer .viewer-note {
+      flex-shrink: 0;
+      padding: 10px 16px;
+      color: #f48771;
+      font-family: 'Menlo', 'Consolas', 'Courier New', monospace;
+      font-size: 13px;
+      background: rgba(244,135,113,0.08);
+      border-top: 1px solid #333;
+      word-break: break-all;
+    }
   </style>
 </head>
 <body>
@@ -257,6 +507,44 @@
   <div id="terminal-container"></div>
 
   <div id="voice-toast" class="voice-toast"></div>
+
+  <button id="file-toggle" type="button" title="文件浏览器" aria-label="文件浏览器">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>
+      <line x1="3" y1="11" x2="21" y2="11"/>
+    </svg>
+  </button>
+
+  <div id="file-backdrop" class="file-backdrop"></div>
+
+  <div id="file-panel">
+    <div class="file-bar">
+      <button id="file-panel-close" class="file-close" type="button" title="关闭 (Esc)" aria-label="关闭">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"/>
+          <line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+      <div id="file-breadcrumb"></div>
+    </div>
+    <div id="file-list"></div>
+    <div id="file-error" style="display:none"></div>
+  </div>
+
+  <div id="file-viewer">
+    <div class="file-bar">
+      <button id="file-viewer-close" class="file-close" type="button" title="关闭 (Esc)" aria-label="关闭">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"/>
+          <line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+      <div id="file-viewer-title" class="file-title"></div>
+      <span id="file-viewer-badge" class="file-badge"></span>
+    </div>
+    <pre><code id="file-viewer-code"></code></pre>
+    <div id="file-viewer-note" class="viewer-note" style="display:none"></div>
+  </div>
 
   <button id="mic-btn" class="action-btn mic-btn" type="button" title="语音输入" aria-label="语音输入">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -287,10 +575,12 @@
     <button class="arrow-btn" data-dir="right" tabindex="-1" aria-label="右">→</button>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-canvas@0.5.0/lib/xterm-addon-canvas.min.js"></script>
+  <script src="vendor/xterm.min.js"></script>
+  <script src="vendor/xterm-addon-fit.min.js"></script>
+  <script src="vendor/xterm-addon-web-links.min.js"></script>
+  <script src="vendor/xterm-addon-canvas.min.js"></script>
+  <script src="vendor/highlight.min.js"></script>
+
 
   <script>
     (function () {
@@ -753,6 +1043,224 @@
           e.key === 'F5' ||
           (e.ctrlKey && e.key === 'F5')
         ) {
+          e.preventDefault();
+        }
+      });
+
+      // -------------------------------------------------------------------
+      // File browser — right slide-in panel + read-only viewer
+      // -------------------------------------------------------------------
+      var fileToggle  = document.getElementById('file-toggle');
+      var fileBackdrop = document.getElementById('file-backdrop');
+      var filePanel   = document.getElementById('file-panel');
+      var fileList    = document.getElementById('file-list');
+      var fileBreadcrumb = document.getElementById('file-breadcrumb');
+      var fileError   = document.getElementById('file-error');
+      var fileViewer  = document.getElementById('file-viewer');
+      var viewerCode  = document.getElementById('file-viewer-code');
+      var viewerTitle = document.getElementById('file-viewer-title');
+      var viewerBadge = document.getElementById('file-viewer-badge');
+      var viewerNote  = document.getElementById('file-viewer-note');
+
+      var authToken = new URL(window.location.href).searchParams.get('token') || '';
+
+      function apiUrl(path, rel) {
+        var u = '/api' + path + '?rel=' + encodeURIComponent(rel || '');
+        if (authToken) u += '&token=' + encodeURIComponent(authToken);
+        return u;
+      }
+
+      function fmtSize(n) {
+        if (n < 1024) return n + ' B';
+        if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+        return (n / (1024 * 1024)).toFixed(1) + ' MB';
+      }
+
+      function renderBreadcrumb(rel) {
+        fileBreadcrumb.innerHTML = '';
+        var parts = (rel && rel !== '.') ? rel.split(/[\\/]/) : [];
+        var acc = '';
+        var root = document.createElement('span');
+        root.className = 'crumb';
+        root.textContent = '\u2302';
+        root.title = '根目录';
+        root.addEventListener('click', function () { loadDir(''); });
+        fileBreadcrumb.appendChild(root);
+        for (var i = 0; i < parts.length; i++) {
+          var sep = document.createElement('span');
+          sep.className = 'crumb-sep';
+          sep.textContent = '/';
+          fileBreadcrumb.appendChild(sep);
+          acc = acc ? acc + '/' + parts[i] : parts[i];
+          var crumb = document.createElement('span');
+          crumb.className = 'crumb' + (i === parts.length - 1 ? ' crumb-current' : '');
+          crumb.textContent = parts[i];
+          if (i < parts.length - 1) {
+            (function (r) {
+              crumb.addEventListener('click', function () { loadDir(r); });
+            })(acc);
+          }
+          fileBreadcrumb.appendChild(crumb);
+        }
+      }
+
+      function setPanelMessage(msg, isError) {
+        fileList.innerHTML = '';
+        fileError.style.display = msg ? 'block' : 'none';
+        fileError.textContent = msg || '';
+        fileError.style.color = isError ? '#f48771' : '#808080';
+      }
+
+      function loadDir(rel) {
+        renderBreadcrumb(rel || '');
+        setPanelMessage('加载中...', false);
+        fetch(apiUrl('/list', rel))
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (data.error) { setPanelMessage(data.error, true); return; }
+            fileError.style.display = 'none';
+            fileList.innerHTML = '';
+            if (data.cwd && data.cwd !== '.') {
+              var up = document.createElement('div');
+              up.className = 'file-entry up';
+              up.innerHTML = '\u2191 .. 返回上级';
+              up.addEventListener('click', function () {
+                var p = (data.cwd || '').split(/[\\/]/);
+                p.pop();
+                loadDir(p.join('/'));
+              });
+              fileList.appendChild(up);
+            }
+            if (!data.entries.length) {
+              setPanelMessage('\uff08空目录\uff09', false);
+              return;
+            }
+            data.entries.forEach(function (e) {
+              var row = document.createElement('div');
+              row.className = 'file-entry' + (e.isDir ? ' dir' : '');
+              var icon = e.isDir
+                ? '<svg class="fe-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>'
+                : '<svg class="fe-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+              row.innerHTML = icon +
+                '<span class="fe-name"></span>' +
+                (e.isDir ? '' : '<span class="fe-size">' + fmtSize(e.size) + '</span>');
+              row.querySelector('.fe-name').textContent = e.name;
+              row.addEventListener('click', function () {
+                if (e.isDir) loadDir(e.rel);
+                else openViewer(e);
+              });
+              fileList.appendChild(row);
+            });
+          })
+          .catch(function (err) {
+            setPanelMessage('加载失败：' + err.message, true);
+          });
+      }
+
+      function escapeHtml(s) {
+        return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      }
+
+      var HIGHLIGHT_EXT = {
+        'js': 'javascript', 'mjs': 'javascript', 'cjs': 'javascript', 'jsx': 'javascript',
+        'ts': 'typescript', 'tsx': 'typescript', 'mts': 'typescript',
+        'py': 'python', 'rb': 'ruby', 'go': 'go', 'rs': 'rust', 'java': 'java',
+        'c': 'c', 'h': 'c', 'cpp': 'cpp', 'cc': 'cpp', 'hpp': 'cpp',
+        'cs': 'csharp', 'php': 'php', 'swift': 'swift', 'kt': 'kotlin',
+        'sh': 'bash', 'bash': 'bash', 'zsh': 'bash', 'ps1': 'powershell',
+        'json': 'json', 'html': 'xml', 'htm': 'xml', 'xml': 'xml', 'svg': 'xml',
+        'css': 'css', 'scss': 'scss', 'less': 'less',
+        'md': 'markdown', 'markdown': 'markdown', 'yml': 'yaml', 'yaml': 'yaml',
+        'sql': 'sql', 'toml': 'ini', 'ini': 'ini', 'conf': 'ini',
+        'txt': '', 'text': '', 'log': '',
+      };
+
+      function langFor(name) {
+        var dot = name.lastIndexOf('.');
+        if (dot < 0) return '';
+        return HIGHLIGHT_EXT[name.slice(dot + 1).toLowerCase()] || '';
+      }
+
+      function openViewer(entry) {
+        viewerTitle.textContent = entry.rel;
+        viewerBadge.textContent = fmtSize(entry.size);
+        viewerNote.style.display = 'none';
+        viewerCode.textContent = '';
+        viewerCode.className = '';
+        fileViewer.classList.add('visible');
+
+        fetch(apiUrl('/file', entry.rel))
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (data.error) {
+              viewerNote.style.display = 'block';
+              viewerNote.textContent = '读取失败：' + data.error;
+              return;
+            }
+            if (data.binary) {
+              viewerNote.style.display = 'block';
+              viewerNote.textContent = '\u26a0 二进制文件，无法以文本方式预览。';
+              return;
+            }
+            var lang = langFor(data.name);
+            var html;
+            if (lang && window.hljs && hljs.getLanguage(lang)) {
+              try {
+                html = hljs.highlight(data.content, { language: lang, ignoreIllegals: true }).value;
+                viewerCode.className = 'hljs language-' + lang;
+              } catch (_) {
+                html = escapeHtml(data.content);
+              }
+            } else {
+              html = escapeHtml(data.content);
+            }
+            viewerCode.innerHTML = html;
+            if (data.truncated) {
+              viewerNote.style.display = 'block';
+              viewerNote.textContent = '\u26a0 文件过大，仅显示前 ' + fmtSize(1024 * 1024) + '。';
+            }
+          })
+          .catch(function (err) {
+            viewerNote.style.display = 'block';
+            viewerNote.textContent = '读取失败：' + err.message;
+          });
+      }
+
+      function closeViewer() {
+        fileViewer.classList.remove('visible');
+        viewerCode.textContent = '';
+        viewerNote.style.display = 'none';
+      }
+
+      function openPanel() {
+        filePanel.classList.add('visible');
+        fileBackdrop.classList.add('visible');
+        loadDir('');
+      }
+
+      function closePanel() {
+        filePanel.classList.remove('visible');
+        fileBackdrop.classList.remove('visible');
+      }
+
+      fileToggle.addEventListener('click', function () {
+        if (filePanel.classList.contains('visible')) closePanel();
+        else openPanel();
+      });
+      document.getElementById('file-panel-close').addEventListener('click', closePanel);
+      document.getElementById('file-viewer-close').addEventListener('click', closeViewer);
+      fileBackdrop.addEventListener('click', function () {
+        if (fileViewer.classList.contains('visible')) closeViewer();
+        else closePanel();
+      });
+
+      document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape') return;
+        if (fileViewer.classList.contains('visible')) {
+          closeViewer();
+          e.preventDefault();
+        } else if (filePanel.classList.contains('visible')) {
+          closePanel();
           e.preventDefault();
         }
       });
