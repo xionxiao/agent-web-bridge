@@ -22,6 +22,14 @@
     #terminal-container {
       height: 100%;
       padding: 4px;
+      overflow: hidden;
+    }
+
+    /* iOS Safari auto-zooms the page when focusing an input whose font-size
+       is under 16px; the terminal's hidden textarea inherits 14px, which makes
+       the page zoom/jump while typing (IME open) on iPhone/iPad. */
+    .xterm .xterm-helper-textarea {
+      font-size: 16px !important;
     }
 
     /* Connection status overlay */
@@ -650,18 +658,29 @@
       }
 
       // -------------------------------------------------------------------
-      // Resize handling (debounced)
+      // Resize handling (debounced).
+      // Skipped while the IME is composing: the IME candidate window often
+      // fires resize events, and letting them re-fit the PTY mid-composition
+      // makes the agent re-render the whole screen (page jumping/flickering).
       // -------------------------------------------------------------------
       var resizeTimer = null;
+      var isComposing = false;
+      var lastCols = 0;
+      var lastRows = 0;
 
       function sendResize() {
+        var dims;
         try {
+          dims = fitAddon.proposeDimensions();
+          if (!dims) return;
+          if (dims.cols === lastCols && dims.rows === lastRows) return;
+          lastCols = dims.cols;
+          lastRows = dims.rows;
           fitAddon.fit();
         } catch (_) {
           return;
         }
-        var dims = fitAddon.proposeDimensions();
-        if (dims && ws && ws.readyState === WebSocket.OPEN) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({
             type: 'resize',
             cols: dims.cols,
@@ -672,6 +691,7 @@
 
       function debouncedResize() {
         if (resizeTimer) clearTimeout(resizeTimer);
+        if (isComposing) return;
         resizeTimer = setTimeout(sendResize, 120);
       }
 
@@ -681,6 +701,16 @@
         var ro = new ResizeObserver(function () { debouncedResize(); });
         ro.observe(container);
       }
+
+      // Don't re-layout the terminal mid-composition; re-fit once after the
+      // IME commits (or cancels) so any real size change is picked up.
+      document.addEventListener('compositionstart', function () {
+        isComposing = true;
+      });
+      document.addEventListener('compositionend', function () {
+        isComposing = false;
+        debouncedResize();
+      });
 
       // -------------------------------------------------------------------
       // WebSocket connection
@@ -727,6 +757,8 @@
 
         ws.onopen = function () {
           cancelReconnect();
+          lastCols = 0;
+          lastRows = 0;
           sendResize();
         };
 
